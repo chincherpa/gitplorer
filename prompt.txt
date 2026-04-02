@@ -1,0 +1,69 @@
+Build a terminal application called `gitplorer` in Python using Textual.
+
+## Goal
+A TUI dashboard that scans local directories for Git repositories and shows their status at a glance — branch, dirty files, last commit, ahead/behind remote.
+
+## Project structure
+gitplorer/
+├── gitplorer/
+│   ├── init.py
+│   ├── app.py          # Textual App
+│   ├── collector.py    # Git data collection via subprocess
+│   └── config.py       # Config loading (~/.gitplorer.toml)
+├── main.py             # Entry point
+└── pyproject.toml
+
+## Config (~/.gitplorer.toml)
+```toml
+scan_dirs = ["~/projects", "~/work"]
+depth = 2
+exclude = [".venv", "node_modules", "__pycache__"]
+```
+Load with `tomllib` (stdlib, Python 3.11+). If no config file exists, fall back to `~/projects` with depth 2.
+
+## Data collection (collector.py)
+- Use `subprocess` only — no GitPython
+- Collect per repo: branch, number of dirty files, last commit message (max 50 chars) + relative age, ahead/behind count vs remote
+- Repos are sorted: dirty first, then alphabetical
+- If a git command fails or times out (5s), mark the repo with an error state instead of crashing
+
+Git commands to use:
+- Branch: `git branch --show-current`
+- Dirty: `git status --short`
+- Last commit: `git log -1 --format=%s|%cr`
+- Ahead/behind: `git rev-list --left-right --count HEAD...@{u}`
+
+## TUI (app.py)
+- Use `textual` with a `DataTable` as main view
+- Columns: Repo | Branch | Status | Last Commit | Age | ↑↓
+- Color coding:
+  - Status clean → green ✓
+  - Status dirty → yellow with file count (e.g. `~ 3`)
+  - Status error → red ERR
+  - Branch → cyan
+  - Ahead/behind → magenta
+- Keybindings:
+  - `r` → refresh
+  - `f` → toggle filter: show only dirty repos
+  - `Enter` → open selected repo in VSCode (`code .` via subprocess)
+  - `q` → quit
+- Refresh must be async (use Textual's worker API) so the UI doesn't freeze during scanning
+
+## Entry point (main.py)
+```python
+from gitplorer.app import GitplorerApp
+
+if __name__ == "__main__":
+    GitplorerApp().run()
+```
+
+## pyproject.toml
+Use `hatchling` or `setuptools`. Dependencies: `textual>=0.50`. Python >= 3.11.
+Add a script entry point so the app can be launched with `gitplorer` after `pip install -e .`.
+
+## Constraints
+- No external Git libraries
+- No network calls
+- Must run on Windows (PowerShell) and Linux
+- All subprocess calls must use `capture_output=True, text=True, timeout=5`
+- Do not use `asyncio.run()` directly — let Textual manage the event loop
