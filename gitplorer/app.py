@@ -5,7 +5,9 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Header, Label
+from textual.containers import VerticalScroll
+from textual.screen import Screen
+from textual.widgets import DataTable, Footer, Header, Label, Static
 from textual.worker import Worker, WorkerState
 
 from .collector import RepoInfo, find_and_collect, _run
@@ -15,6 +17,138 @@ _COMMIT_KEY_PREFIX = "__commit__"
 _REMOTE_KEY_PREFIX = "__remote__"
 
 
+class RepoDetailScreen(Screen):
+    BINDINGS = [
+        Binding("enter", "back", "Back"),
+        Binding("escape", "back", "Back"),
+        Binding("q", "back", "Back"),
+        Binding("v", "open_vscode", "Open in VSCode"),
+    ]
+
+    CSS = """
+    RepoDetailScreen {
+        background: $surface;
+    }
+    VerticalScroll {
+        height: 1fr;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, repo: RepoInfo) -> None:
+        super().__init__()
+        self._repo = repo
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll():
+            yield Static("Loading…", id="detail-content")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.run_worker(self._gather_details, thread=True)
+
+    def _gather_details(self) -> str:
+        repo = self._repo
+        lines: list[str] = []
+
+        # ── Title ────────────────────────────────────────────────────────────
+        lines.append(f"[bold cyan]{repo.name}[/bold cyan]  [dim]{repo.path}[/dim]")
+        lines.append("")
+
+        # ── Branch + ahead/behind ────────────────────────────────────────────
+        ab_parts: list[str] = []
+        if repo.ahead:
+            ab_parts.append(f"[magenta]↑{repo.ahead}[/magenta]")
+        if repo.behind:
+            ab_parts.append(f"[magenta]↓{repo.behind}[/magenta]")
+        ab_str = "  " + " ".join(ab_parts) if ab_parts else ""
+        lines.append(f"Branch: [cyan]{repo.branch}[/cyan]{ab_str}")
+
+        # ── Remote ──────────────────────────────────────────────────────────
+        _, url = _run(["git", "remote", "get-url", "origin"], repo.path)
+        lines.append(f"Remote: [blue]{url}[/blue]" if url else "Remote: [dim](none)[/dim]")
+        lines.append("")
+
+        # ── Working-tree status ──────────────────────────────────────────────
+        if repo.error:
+            lines.append("[red]Error reading repo[/red]")
+        elif repo.dirty_count == 0:
+            lines.append("Status: [green]✓ Clean[/green]")
+        else:
+            parts: list[str] = []
+            if repo.staged:
+                parts.append(f"[green]{repo.staged} staged[/green]")
+            if repo.modified:
+                parts.append(f"[yellow]{repo.modified} modified[/yellow]")
+            if repo.untracked:
+                parts.append(f"[dim]{repo.untracked} untracked[/dim]")
+            lines.append(f"Status: [bold]{repo.dirty_count} dirty[/bold]  ({', '.join(parts)})")
+
+            ok, status_out = _run(["git", "status", "--short"], repo.path)
+            if ok and status_out:
+                for raw in status_out.splitlines()[:25]:
+                    if len(raw) < 3:
+                        continue
+                    x, y, fname = raw[0], raw[1], raw[3:]
+                    if x == "?" and y == "?":
+                        lines.append(f"  [dim]?  {fname}[/dim]")
+                    elif x not in (" ", "?"):
+                        lines.append(f"  [green]+  {fname}[/green]")
+                    else:
+                        lines.append(f"  [yellow]~  {fname}[/yellow]")
+
+        lines.append("")
+
+        # ── Stash ────────────────────────────────────────────────────────────
+        ok, stash_out = _run(["git", "stash", "list"], repo.path)
+        stash_entries = stash_out.splitlines() if (ok and stash_out) else []
+        if stash_entries:
+            lines.append(f"Stash: [yellow]{len(stash_entries)} {'entry' if len(stash_entries) == 1 else 'entries'}[/yellow]")
+            for entry in stash_entries[:4]:
+                lines.append(f"  [dim]{entry}[/dim]")
+            if len(stash_entries) > 4:
+                lines.append(f"  [dim]… and {len(stash_entries) - 4} more[/dim]")
+            lines.append("")
+
+        # ── Last 10 commits ──────────────────────────────────────────────────
+        lines.append("[bold]Last 10 commits:[/bold]")
+        ok, log_out = _run(
+            ["git", "log", "-10", "--format=%h\x1f%s\x1f%cr\x1f%an"],
+            repo.path,
+        )
+        if ok and log_out.strip():
+            commit_lines = log_out.splitlines()
+            for i, raw in enumerate(commit_lines):
+                cols = raw.split("\x1f", 3)
+                if len(cols) != 4:
+                    continue
+                h, msg, age, author = cols
+                connector = "└─" if i == len(commit_lines) - 1 else "├─"
+                lines.append(
+                    f"  [dim]{connector}[/dim] [yellow]{h}[/yellow]  "
+                    f"{msg[:55]:<55}  [dim]{age:<18}[/dim]  [cyan]{author}[/cyan]"
+                )
+        else:
+            lines.append("  [dim](no commits)[/dim]")
+
+        return "\n".join(lines)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state == WorkerState.SUCCESS:
+            self.query_one("#detail-content", Static).update(event.worker.result)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_open_vscode(self) -> None:
+        subprocess.Popen(
+            ["code", str(self._repo.path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 class GitplorerApp(App):
     TITLE = "gitplorer"
     SUB_TITLE = "Git repository dashboard"
@@ -22,7 +156,8 @@ class GitplorerApp(App):
     BINDINGS = [
         Binding("f5", "refresh", "Refresh"),
         Binding("f", "toggle_filter", "Filter dirty"),
-        Binding("enter", "open_vscode", "Open in VSCode"),
+        Binding("enter", "open_detail", "Detail"),
+        Binding("v", "open_vscode", "VSCode"),
         Binding("right", "expand_commits", "Commits"),
         Binding("left", "collapse_all", "Collapse"),
         Binding("r", "expand_remote", "Remote"),
@@ -145,7 +280,7 @@ class GitplorerApp(App):
         total = len(self._all_repos)
         self.query_one("#status", Label).update(
             f"{count}/{total} repos{filter_note}  "
-            f"[dim]f5=refresh  f=filter  r=remote  →=commits  p=push  enter=vscode  q=quit[/dim]"
+            f"[dim]f5=refresh  f=filter  r=remote  →=commits  p=push  enter=detail  v=vscode  q=quit[/dim]"
         )
 
     def _format_status(self, repo: RepoInfo) -> str:
@@ -188,6 +323,28 @@ class GitplorerApp(App):
         if not path_str or self._is_expand_key(path_str):
             return None
         return next((r for r in self._all_repos if str(r.path) == path_str), None)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        path_str = event.row_key.value
+        if not path_str or self._is_expand_key(path_str):
+            return
+        repo = next((r for r in self._all_repos if str(r.path) == path_str), None)
+        if repo and not repo.error:
+            self.push_screen(RepoDetailScreen(repo))
+
+    def action_open_detail(self) -> None:
+        repo = self._selected_repo()
+        if repo and not repo.error:
+            self.push_screen(RepoDetailScreen(repo))
+
+    def action_open_vscode(self) -> None:
+        repo = self._selected_repo()
+        if repo:
+            subprocess.Popen(
+                ["code", str(repo.path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
     def action_expand_commits(self) -> None:
         repo = self._selected_repo()
@@ -236,15 +393,6 @@ class GitplorerApp(App):
         self._remote_url = ""
         if changed:
             self._render_table()
-
-    def action_open_vscode(self) -> None:
-        repo = self._selected_repo()
-        if repo:
-            subprocess.Popen(
-                ["code", str(repo.path)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
 
     def action_git_push(self) -> None:
         repo = self._selected_repo()
