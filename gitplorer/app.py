@@ -210,7 +210,14 @@ class GitplorerApp(App):
 
     def _load_repos(self) -> list[RepoInfo]:
         config = load_config()
-        return find_and_collect(config)
+
+        def on_progress(path):
+            self.call_from_thread(
+                self.query_one("#status", Label).update,
+                f"Scanning: {path}",
+            )
+
+        return find_and_collect(config, on_progress=on_progress)
 
     def _visible_repos(self) -> list[RepoInfo]:
         if self._filter_dirty:

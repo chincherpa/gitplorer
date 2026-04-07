@@ -118,7 +118,7 @@ def _scan(directory: Path, depth: int, exclude: list[str]) -> list[Path]:
     return repos
 
 
-def find_and_collect(config: Config) -> list[RepoInfo]:
+def find_and_collect(config: Config, on_progress=None) -> list[RepoInfo]:
     paths: list[Path] = []
     for scan_dir in config.scan_dirs:
         if not scan_dir.exists():
@@ -134,7 +134,11 @@ def find_and_collect(config: Config) -> list[RepoInfo]:
             seen.add(rp)
             unique.append(p)
 
-    repos = [collect_repo(p) for p in unique]
+    repos = []
+    for p in unique:
+        if on_progress:
+            on_progress(p)
+        repos.append(collect_repo(p))
 
     # sort: dirty first, then alphabetical
     repos.sort(key=lambda r: (not r.error and r.dirty_count == 0, r.name.lower()))
