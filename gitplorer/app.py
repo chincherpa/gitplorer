@@ -351,6 +351,7 @@ class GitplorerApp(App):
                 ["code", str(repo.path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                shell=True,
             )
 
     def action_expand_commits(self) -> None:
