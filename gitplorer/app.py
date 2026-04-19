@@ -31,7 +31,7 @@ def _push_with_auto_commit(repo_path: Path) -> tuple[bool, str]:
             return False, msg
     return _run(["git", "push"], repo_path)
 
-from .collector import RepoInfo, find_and_collect, _run
+from .collector import RepoInfo, collect_repo, find_and_collect, _run
 from .config import load_config
 
 _COMMIT_KEY_PREFIX = "__commit__"
@@ -510,13 +510,32 @@ class GitplorerApp(App):
                 repo_name = event.worker.name[len("push_"):]
                 if ok:
                     self.notify(f"✓ {repo_name} pushed", severity="information")
-                    self.action_refresh()
+                    repo = next((r for r in self._all_repos if r.name == repo_name), None)
+                    if repo is not None:
+                        self._refresh_single_repo(repo.path)
                 else:
                     self.notify(f"✗ Push failed: {msg[:80]}", severity="error", timeout=6)
+            return
+        if event.worker.name and event.worker.name.startswith("refresh_repo_"):
+            if event.state == WorkerState.SUCCESS:
+                updated = event.worker.result
+                for i, r in enumerate(self._all_repos):
+                    if r.path == updated.path:
+                        self._all_repos[i] = updated
+                        break
+                self._render_table()
             return
         if event.state == WorkerState.SUCCESS:
             self._all_repos = event.worker.result
             self._render_table()
+
+    def _refresh_single_repo(self, repo_path: Path) -> None:
+        self.run_worker(
+            lambda: collect_repo(repo_path),
+            exclusive=False,
+            thread=True,
+            name=f"refresh_repo_{repo_path}",
+        )
         elif event.state == WorkerState.ERROR:
             self.query_one("#status", Label).update("[red]Error during scan[/red]")
 
