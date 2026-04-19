@@ -528,6 +528,8 @@ class GitplorerApp(App):
         if event.state == WorkerState.SUCCESS:
             self._all_repos = event.worker.result
             self._render_table()
+        elif event.state == WorkerState.ERROR:
+            self.query_one("#status", Label).update("[red]Error during scan[/red]")
 
     def _refresh_single_repo(self, repo_path: Path) -> None:
         self.run_worker(
@@ -536,8 +538,6 @@ class GitplorerApp(App):
             thread=True,
             name=f"refresh_repo_{repo_path}",
         )
-        elif event.state == WorkerState.ERROR:
-            self.query_one("#status", Label).update("[red]Error during scan[/red]")
 
 
 def main() -> None:
