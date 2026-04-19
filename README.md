@@ -54,7 +54,7 @@ exclude   = [".venv", "node_modules", "__pycache__"]
 
 | Option | Default | Description |
 |---|---|---|
-| `scan_dirs` | `["D:/Projects"]` | Directories to scan for repos |
+| `scan_dirs` | `["E:/Projects"]` | Directories to scan for repos |
 | `depth` | `2` | How many levels deep to recurse |
 | `exclude` | `[".venv", "node_modules", "__pycache__"]` | Directory names to skip |
 

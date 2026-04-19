@@ -1,14 +1,35 @@
 from __future__ import annotations
 
+import string
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Label, Static
+from textual.widgets import Button, DataTable, DirectoryTree, Footer, Header, Label, Static
 from textual.worker import Worker, WorkerState
+
+
+def _get_drives() -> list[str]:
+    return [f"{l}:" for l in string.ascii_uppercase if Path(f"{l}:\\").exists()]
+
+
+def _push_with_auto_commit(repo_path: Path) -> tuple[bool, str]:
+    ok, status_out = _run(["git", "status", "--porcelain"], repo_path)
+    if not ok:
+        return False, status_out
+    if status_out.strip():
+        ok, msg = _run(["git", "add", "-A"], repo_path)
+        if not ok:
+            return False, msg
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ok, msg = _run(["git", "commit", "-m", f"auto push {timestamp}"], repo_path)
+        if not ok:
+            return False, msg
+    return _run(["git", "push"], repo_path)
 
 from .collector import RepoInfo, find_and_collect, _run
 from .config import load_config
@@ -156,6 +177,7 @@ class GitplorerApp(App):
     BINDINGS = [
         Binding("f5", "refresh", "Refresh"),
         Binding("f", "toggle_filter", "Filter dirty"),
+        Binding("b", "toggle_sidebar", "Browse"),
         Binding("enter", "open_detail", "Detail"),
         Binding("v", "open_vscode", "VSCode"),
         Binding("right", "expand_commits", "Commits"),
@@ -177,6 +199,29 @@ class GitplorerApp(App):
     DataTable {
         height: 1fr;
     }
+    #sidebar {
+        width: 30;
+        border-right: tall $primary-darken-2;
+        display: none;
+    }
+    #sidebar.active {
+        display: block;
+    }
+    #drive-bar {
+        height: 3;
+        padding: 0 1;
+    }
+    .drive-btn {
+        min-width: 4;
+        height: 3;
+        margin-right: 1;
+    }
+    #dir-tree {
+        height: 1fr;
+    }
+    #main-area {
+        width: 1fr;
+    }
     """
 
     def __init__(self) -> None:
@@ -187,11 +232,20 @@ class GitplorerApp(App):
         self._expanded_commits: list[tuple[str, str]] = []
         self._remote_expanded_path: str | None = None
         self._remote_url: str = ""
+        self._sidebar_visible: bool = False
+        self._custom_scan_dir: Path | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Label("Loading...", id="status")
-        yield DataTable()
+        with Horizontal():
+            with Vertical(id="sidebar"):
+                with Horizontal(id="drive-bar"):
+                    for drive in _get_drives():
+                        yield Button(drive, id=f"drive-{drive[0]}", classes="drive-btn")
+                yield DirectoryTree(Path.home(), id="dir-tree")
+            with Vertical(id="main-area"):
+                yield Label("Loading...", id="status")
+                yield DataTable()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -201,6 +255,7 @@ class GitplorerApp(App):
         self.action_refresh()
 
     def action_refresh(self) -> None:
+        self._custom_scan_dir = None
         self._expanded_path = None
         self._expanded_commits = []
         self._remote_expanded_path = None
@@ -210,6 +265,13 @@ class GitplorerApp(App):
 
     def _load_repos(self) -> list[RepoInfo]:
         config = load_config()
+        if self._custom_scan_dir is not None:
+            from .config import Config
+            config = Config(
+                scan_dirs=[self._custom_scan_dir],
+                depth=config.depth,
+                exclude=config.exclude,
+            )
 
         def on_progress(path):
             self.call_from_thread(
@@ -321,6 +383,22 @@ class GitplorerApp(App):
         self._remote_expanded_path = None
         self._render_table()
 
+    def action_toggle_sidebar(self) -> None:
+        self._sidebar_visible = not self._sidebar_visible
+        sidebar = self.query_one("#sidebar")
+        if self._sidebar_visible:
+            sidebar.add_class("active")
+            self.query_one("#dir-tree", DirectoryTree).focus()
+        else:
+            sidebar.remove_class("active")
+            self.query_one(DataTable).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id or ""
+        if btn_id.startswith("drive-"):
+            letter = btn_id[6]
+            self.query_one("#dir-tree", DirectoryTree).path = Path(f"{letter}:\\")
+
     def _selected_repo(self) -> RepoInfo | None:
         table = self.query_one(DataTable)
         if table.row_count == 0:
@@ -330,6 +408,17 @@ class GitplorerApp(App):
         if not path_str or self._is_expand_key(path_str):
             return None
         return next((r for r in self._all_repos if str(r.path) == path_str), None)
+
+    def on_directory_tree_directory_selected(
+        self, event: DirectoryTree.DirectorySelected
+    ) -> None:
+        self._custom_scan_dir = event.path
+        self._expanded_path = None
+        self._expanded_commits = []
+        self._remote_expanded_path = None
+        self._remote_url = ""
+        self.query_one("#status", Label).update(f"Scanning {event.path.name}...")
+        self.run_worker(self._load_repos, exclusive=True, thread=True)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         path_str = event.row_key.value
@@ -408,7 +497,7 @@ class GitplorerApp(App):
             return
         self.notify(f"Pushing {repo.name}…", timeout=2)
         self.run_worker(
-            lambda: _run(["git", "push"], repo.path),
+            lambda: _push_with_auto_commit(repo.path),
             exclusive=False,
             thread=True,
             name=f"push_{repo.name}",
