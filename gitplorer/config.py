@@ -22,4 +22,4 @@ def load_config() -> Config:
             depth=data.get("depth", 2),
             exclude=data.get("exclude", [".venv", "node_modules", "__pycache__"]),
         )
-    return Config(scan_dirs=[Path("E:/Projects")])
+    return Config(scan_dirs=[Path("D:/Projects")])

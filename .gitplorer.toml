@@ -1,3 +1,3 @@
-scan_dirs = ['E:/Projects', 'C:\Users\FV4tJAY\Desktop\D\Projects']
+scan_dirs = ['D:/Projects', 'C:\Users\FV4tJAY\Desktop\D\Projects']
 depth     = 2
 exclude   = ['.venv', 'node_modules', '__pycache__', 'dist', 'build']

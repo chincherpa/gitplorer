@@ -19,6 +19,7 @@ class RepoInfo:
     age: str
     ahead: int
     behind: int
+    has_remote: bool = False
     error: bool = False
 
     @property
@@ -71,6 +72,9 @@ def collect_repo(path: Path) -> RepoInfo:
         last_commit = ""
         age = ""
 
+    ok, remotes_out = _run(["git", "remote"], path)
+    has_remote = bool(ok and remotes_out.strip())
+
     ok, rev_out = _run(["git", "rev-list", "--left-right", "--count", "HEAD...@{u}"], path)
     if ok and "\t" in rev_out:
         parts = rev_out.split()
@@ -92,6 +96,7 @@ def collect_repo(path: Path) -> RepoInfo:
         age=age,
         ahead=ahead,
         behind=behind,
+        has_remote=has_remote,
     )
 
 

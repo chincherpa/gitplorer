@@ -44,6 +44,7 @@ class RepoDetailScreen(Screen):
         Binding("escape", "back", "Back"),
         Binding("q", "back", "Back"),
         Binding("v", "open_vscode", "Open in VSCode"),
+        Binding("o", "open_folder", "Open folder"),
     ]
 
     CSS = """
@@ -169,6 +170,9 @@ class RepoDetailScreen(Screen):
             stderr=subprocess.DEVNULL,
         )
 
+    def action_open_folder(self) -> None:
+        subprocess.Popen(["explorer", str(self._repo.path)])
+
 
 class GitplorerApp(App):
     TITLE = "gitplorer"
@@ -180,6 +184,7 @@ class GitplorerApp(App):
         Binding("b", "toggle_sidebar", "Browse"),
         Binding("enter", "open_detail", "Detail"),
         Binding("v", "open_vscode", "VSCode"),
+        Binding("o", "open_folder", "Open folder"),
         Binding("right", "expand_commits", "Commits"),
         Binding("left", "collapse_all", "Collapse"),
         Binding("r", "expand_remote", "Remote"),
@@ -251,7 +256,7 @@ class GitplorerApp(App):
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.cursor_type = "row"
-        table.add_columns("Repo", "Branch", "Status", "Last Commit", "Age", "↑↓")
+        table.add_columns("Repo", "Branch", "Status", "Last Commit", "Age", "↑↓", "Remote")
         self.action_refresh()
 
     def action_refresh(self) -> None:
@@ -318,6 +323,7 @@ class GitplorerApp(App):
                 repo.last_commit if not repo.error else "",
                 repo.age if not repo.error else "",
                 self._format_ahead_behind(repo),
+                "[green]✓[/green]" if repo.has_remote else "[red]✗[/red]",
                 key=path_str,
             )
             if path_str == selected_key:
@@ -327,7 +333,7 @@ class GitplorerApp(App):
             if path_str == self._remote_expanded_path:
                 table.add_row(
                     f"[dim]  remote  [/dim][blue]{self._remote_url or '(no remote)'}[/blue]",
-                    "", "", "", "", "",
+                    "", "", "", "", "", "",
                     key=f"{_REMOTE_KEY_PREFIX}{path_str}",
                 )
                 row_index += 1
@@ -336,7 +342,7 @@ class GitplorerApp(App):
                 for i, (msg, age) in enumerate(self._expanded_commits):
                     table.add_row(
                         f"[dim]  {'└─' if i == len(self._expanded_commits) - 1 else '├─'} {msg}[/dim]",
-                        "", "", "", f"[dim]{age}[/dim]", "",
+                        "", "", "", f"[dim]{age}[/dim]", "", "",
                         key=f"{_COMMIT_KEY_PREFIX}{path_str}_{i}",
                     )
                     row_index += 1
@@ -349,7 +355,7 @@ class GitplorerApp(App):
         total = len(self._all_repos)
         self.query_one("#status", Label).update(
             f"{count}/{total} repos{filter_note}  "
-            f"[dim]f5=refresh  f=filter  r=remote  →=commits  p=push  enter=detail  v=vscode  q=quit[/dim]"
+            f"[dim]f5=refresh  f=filter  r=remote  →=commits  p=push  enter=detail  v=vscode  o=folder  q=quit[/dim]"
         )
 
     def _format_status(self, repo: RepoInfo) -> str:
@@ -442,6 +448,11 @@ class GitplorerApp(App):
                 stderr=subprocess.DEVNULL,
                 shell=True,
             )
+
+    def action_open_folder(self) -> None:
+        repo = self._selected_repo()
+        if repo:
+            subprocess.Popen(["explorer", str(repo.path)])
 
     def action_expand_commits(self) -> None:
         repo = self._selected_repo()
