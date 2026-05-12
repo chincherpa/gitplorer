@@ -19,6 +19,7 @@ class RepoInfo:
     age: str
     ahead: int
     behind: int
+    last_commit_ts: int = 0
     has_remote: bool = False
     error: bool = False
 
@@ -63,11 +64,16 @@ def collect_repo(path: Path) -> RepoInfo:
                 modified += 1
     dirty_count = staged + modified + untracked
 
-    ok, log_out = _run(["git", "log", "-1", "--format=%s|%cr"], path)
+    ok, log_out = _run(["git", "log", "-1", "--format=%s|%cr|%ct"], path)
+    last_commit_ts = 0
     if ok and "|" in log_out:
-        parts = log_out.split("|", 1)
+        parts = log_out.split("|", 2)
         last_commit = parts[0][:50]
-        age = parts[1]
+        age = parts[1] if len(parts) > 1 else ""
+        try:
+            last_commit_ts = int(parts[2]) if len(parts) > 2 else 0
+        except ValueError:
+            last_commit_ts = 0
     else:
         last_commit = ""
         age = ""
@@ -96,6 +102,7 @@ def collect_repo(path: Path) -> RepoInfo:
         age=age,
         ahead=ahead,
         behind=behind,
+        last_commit_ts=last_commit_ts,
         has_remote=has_remote,
     )
 
@@ -145,6 +152,4 @@ def find_and_collect(config: Config, on_progress=None) -> list[RepoInfo]:
             on_progress(p)
         repos.append(collect_repo(p))
 
-    # sort: dirty first, then alphabetical
-    repos.sort(key=lambda r: (not r.error and r.dirty_count == 0, r.name.lower()))
     return repos

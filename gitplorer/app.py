@@ -174,6 +174,56 @@ class RepoDetailScreen(Screen):
         subprocess.Popen(["explorer", str(self._repo.path)])
 
 
+class QuickDiffScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "back", "Close"),
+        Binding("q", "back", "Close"),
+    ]
+
+    CSS = """
+    QuickDiffScreen {
+        align: center middle;
+    }
+    #diff-container {
+        width: 80%;
+        height: 80%;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(self, repo: RepoInfo) -> None:
+        super().__init__()
+        self._repo = repo
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="diff-container"):
+            yield Static(
+                f"[bold]{self._repo.name}[/bold] — diff --stat\n\n[dim]Loading…[/dim]",
+                id="diff-content",
+            )
+
+    def on_mount(self) -> None:
+        self.run_worker(self._gather_diff, thread=True)
+
+    def _gather_diff(self) -> str:
+        ok, out = _run(["git", "diff", "--stat", "HEAD"], self._repo.path)
+        if not ok or not out:
+            _, out = _run(["git", "diff", "--stat"], self._repo.path)
+        return out or "(no changes)"
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state == WorkerState.SUCCESS:
+            content = event.worker.result
+            self.query_one("#diff-content", Static).update(
+                f"[bold]{self._repo.name}[/bold] — diff --stat\n\n{content}"
+            )
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
 class GitplorerApp(App):
     TITLE = "gitplorer"
     SUB_TITLE = "Git repository dashboard"
@@ -181,6 +231,8 @@ class GitplorerApp(App):
     BINDINGS = [
         Binding("f5", "refresh", "Refresh"),
         Binding("f", "toggle_filter", "Filter dirty"),
+        Binding("s", "toggle_sort", "Sort"),
+        Binding("d", "quick_diff", "Diff"),
         Binding("b", "toggle_sidebar", "Browse"),
         Binding("enter", "open_detail", "Detail"),
         Binding("v", "open_vscode", "VSCode"),
@@ -233,6 +285,7 @@ class GitplorerApp(App):
         super().__init__()
         self._all_repos: list[RepoInfo] = []
         self._filter_dirty = False
+        self._sort_mode: str = "dirty"
         self._expanded_path: str | None = None
         self._expanded_commits: list[tuple[str, str]] = []
         self._remote_expanded_path: str | None = None
@@ -286,10 +339,21 @@ class GitplorerApp(App):
 
         return find_and_collect(config, on_progress=on_progress)
 
+    def _sorted_repos(self) -> list[RepoInfo]:
+        repos = list(self._all_repos)
+        if self._sort_mode == "dirty":
+            repos.sort(key=lambda r: (not r.error and r.dirty_count == 0, r.name.lower()))
+        elif self._sort_mode == "alpha":
+            repos.sort(key=lambda r: r.name.lower())
+        elif self._sort_mode == "age":
+            repos.sort(key=lambda r: (r.error, -r.last_commit_ts))
+        return repos
+
     def _visible_repos(self) -> list[RepoInfo]:
+        repos = self._sorted_repos()
         if self._filter_dirty:
-            return [r for r in self._all_repos if r.error or r.dirty_count > 0]
-        return self._all_repos
+            return [r for r in repos if r.error or r.dirty_count > 0]
+        return repos
 
     def _is_expand_key(self, val: str | None) -> bool:
         if val is None:
@@ -316,14 +380,23 @@ class GitplorerApp(App):
 
         for repo in repos:
             path_str = str(repo.path)
+            no_remote = not repo.error and not repo.has_remote
+            if no_remote:
+                o, c = "[orange1]", "[/orange1]"
+                branch_cell = f"[orange1][cyan]{repo.branch}[/cyan][/orange1]" if not repo.error else ""
+                remote_cell = f"[orange1][red]✗[/red][/orange1]"
+            else:
+                o, c = "", ""
+                branch_cell = f"[cyan]{repo.branch}[/cyan]" if not repo.error else ""
+                remote_cell = "[green]✓[/green]" if repo.has_remote else "[red]✗[/red]"
             table.add_row(
-                repo.name,
-                f"[cyan]{repo.branch}[/cyan]" if not repo.error else "",
-                self._format_status(repo),
-                repo.last_commit if not repo.error else "",
-                repo.age if not repo.error else "",
-                self._format_ahead_behind(repo),
-                "[green]✓[/green]" if repo.has_remote else "[red]✗[/red]",
+                f"{o}{repo.name}{c}",
+                branch_cell,
+                f"{o}{self._format_status(repo)}{c}",
+                f"{o}{repo.last_commit if not repo.error else ''}{c}",
+                f"{o}{repo.age if not repo.error else ''}{c}",
+                f"{o}{self._format_ahead_behind(repo)}{c}",
+                remote_cell,
                 key=path_str,
             )
             if path_str == selected_key:
@@ -351,11 +424,13 @@ class GitplorerApp(App):
             table.move_cursor(row=restore_at)
 
         filter_note = " [yellow](dirty only)[/yellow]" if self._filter_dirty else ""
+        sort_labels = {"dirty": "dirty", "alpha": "a-z", "age": "recent"}
+        sort_note = f" [dim](sort: {sort_labels[self._sort_mode]})[/dim]"
         count = len(repos)
         total = len(self._all_repos)
         self.query_one("#status", Label).update(
-            f"{count}/{total} repos{filter_note}  "
-            f"[dim]f5=refresh  f=filter  r=remote  →=commits  p=push  enter=detail  v=vscode  o=folder  q=quit[/dim]"
+            f"{count}/{total} repos{filter_note}{sort_note}  "
+            f"[dim]f5=refresh  f=filter  s=sort  d=diff  r=remote  →=commits  p=push  enter=detail  v=vscode  o=folder  q=quit[/dim]"
         )
 
     def _format_status(self, repo: RepoInfo) -> str:
@@ -387,6 +462,11 @@ class GitplorerApp(App):
         self._expanded_path = None
         self._expanded_commits = []
         self._remote_expanded_path = None
+        self._render_table()
+
+    def action_toggle_sort(self) -> None:
+        modes = ["dirty", "alpha", "age"]
+        self._sort_mode = modes[(modes.index(self._sort_mode) + 1) % len(modes)]
         self._render_table()
 
     def action_toggle_sidebar(self) -> None:
@@ -438,6 +518,12 @@ class GitplorerApp(App):
         repo = self._selected_repo()
         if repo and not repo.error:
             self.push_screen(RepoDetailScreen(repo))
+
+    def action_quick_diff(self) -> None:
+        repo = self._selected_repo()
+        if repo is None or repo.error:
+            return
+        self.push_screen(QuickDiffScreen(repo))
 
     def action_open_vscode(self) -> None:
         repo = self._selected_repo()
