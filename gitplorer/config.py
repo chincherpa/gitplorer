@@ -14,12 +14,10 @@ class Config:
 
 def load_config() -> Config:
     config_path = Path(".gitplorer.toml")
-    if config_path.exists():
-        with open(config_path, "rb") as f:
-            data = tomllib.load(f)
-        return Config(
-            scan_dirs=[Path(d).expanduser() for d in data.get("scan_dirs", ["~/projects"])],
-            depth=data.get("depth", 2),
-            exclude=data.get("exclude", [".venv", "node_modules", "__pycache__"]),
-        )
-    return Config(scan_dirs=[Path("D:/Projects")])
+    with open(config_path, "rb") as f:
+        data = tomllib.load(f)
+    return Config(
+        scan_dirs=[Path(d).expanduser() for d in data.get("scan_dirs", ["~/projects"])],
+        depth=data.get("depth", 2),
+        exclude=data.get("exclude", [".venv", "node_modules", "__pycache__"]),
+    )
