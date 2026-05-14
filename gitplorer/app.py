@@ -5,6 +5,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from rich.markup import escape
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -149,7 +151,7 @@ class RepoDetailScreen(Screen):
                 connector = "└─" if i == len(commit_lines) - 1 else "├─"
                 lines.append(
                     f"  [dim]{connector}[/dim] [yellow]{h}[/yellow]  "
-                    f"{msg[:55]:<55}  [dim]{age:<18}[/dim]  [cyan]{author}[/cyan]"
+                    f"{escape(msg)[:55]:<55}  [dim]{age:<18}[/dim]  [cyan]{escape(author)}[/cyan]"
                 )
         else:
             lines.append("  [dim](no commits)[/dim]")
@@ -224,6 +226,78 @@ class QuickDiffScreen(Screen):
         self.app.pop_screen()
 
 
+class RepoPanel(VerticalScroll):
+    DEFAULT_CSS = """
+    RepoPanel {
+        width: 40;
+        border-left: tall $primary-darken-2;
+        padding: 0 1;
+        background: $surface;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._width: int = 40
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="panel-content")
+
+    def load_repo(self, repo: "RepoInfo | None") -> None:
+        if not self.is_attached:
+            return
+        content = self.query_one("#panel-content", Static)
+        if repo is None:
+            content.update("")
+            return
+        content.update("[dim]Loading…[/dim]")
+        width = self._width
+        self.run_worker(
+            lambda: self._build_content(repo, width),
+            exclusive=True,
+            group="panel",
+            thread=True,
+        )
+
+    def _build_content(self, repo: "RepoInfo", width: int) -> str:
+        lines: list[str] = []
+        lines.append(f"[bold cyan]{repo.name}[/bold cyan]")
+        ab_parts: list[str] = []
+        if repo.ahead:
+            ab_parts.append(f"↑{repo.ahead}")
+        if repo.behind:
+            ab_parts.append(f"↓{repo.behind}")
+        branch_line = f"[cyan]{repo.branch}[/cyan]"
+        if ab_parts:
+            branch_line += f"  [magenta]{' '.join(ab_parts)}[/magenta]"
+        lines.append(branch_line)
+        _, url = _run(["git", "remote", "get-url", "origin"], repo.path)
+        lines.append(f"[dim blue]{url}[/dim blue]" if url else "[dim](no remote)[/dim]")
+        lines.append("[dim]" + "─" * max(1, width - 4) + "[/dim]")
+        ok, log_out = _run(
+            ["git", "log", "-20", "--format=%h\x1f%s\x1f%cr"],
+            repo.path,
+        )
+        if ok and log_out.strip():
+            subj_len = max(10, width - 22)
+            for raw in log_out.splitlines():
+                cols = raw.split("\x1f", 2)
+                if len(cols) != 3:
+                    continue
+                h, msg, age = cols
+                lines.append(
+                    f"[yellow]{h}[/yellow] {escape(msg)[:subj_len]:<{subj_len}}  [dim]{age}[/dim]"
+                )
+        else:
+            lines.append("[dim](no commits)[/dim]")
+        return "\n".join(lines)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        event.stop()
+        if event.state == WorkerState.SUCCESS:
+            self.query_one("#panel-content", Static).update(event.worker.result)
+
+
 class GitplorerApp(App):
     TITLE = "gitplorer"
     SUB_TITLE = "Git repository dashboard"
@@ -241,6 +315,8 @@ class GitplorerApp(App):
         Binding("left", "collapse_all", "Collapse"),
         Binding("r", "expand_remote", "Remote"),
         Binding("p", "git_push", "Push"),
+        Binding("[", "shrink_panel", "Panel −"),
+        Binding("]", "grow_panel", "Panel +"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -279,6 +355,9 @@ class GitplorerApp(App):
     #main-area {
         width: 1fr;
     }
+    #table-area {
+        height: 1fr;
+    }
     """
 
     def __init__(self) -> None:
@@ -292,6 +371,7 @@ class GitplorerApp(App):
         self._remote_url: str = ""
         self._sidebar_visible: bool = False
         self._custom_scan_dir: Path | None = None
+        self._panel_width: int = 40
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -303,7 +383,9 @@ class GitplorerApp(App):
                 yield DirectoryTree(Path.home(), id="dir-tree")
             with Vertical(id="main-area"):
                 yield Label("Loading...", id="status")
-                yield DataTable()
+                with Horizontal(id="table-area"):
+                    yield DataTable()
+                    yield RepoPanel()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -432,6 +514,8 @@ class GitplorerApp(App):
             f"{count}/{total} repos{filter_note}{sort_note}  "
             f"[dim]f5=refresh  f=filter  s=sort  d=diff  r=remote  →=commits  p=push  enter=detail  v=vscode  o=folder  q=quit[/dim]"
         )
+        repo = self._selected_repo()
+        self.query_one(RepoPanel).load_repo(repo)
 
     def _format_status(self, repo: RepoInfo) -> str:
         if repo.error:
@@ -514,6 +598,15 @@ class GitplorerApp(App):
         if repo and not repo.error:
             self.push_screen(RepoDetailScreen(repo))
 
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        path_str = event.row_key.value if event.row_key else None
+        panel = self.query_one(RepoPanel)
+        if not path_str or self._is_expand_key(path_str):
+            panel.load_repo(None)
+            return
+        repo = next((r for r in self._all_repos if str(r.path) == path_str), None)
+        panel.load_repo(repo)
+
     def action_open_detail(self) -> None:
         repo = self._selected_repo()
         if repo and not repo.error:
@@ -557,7 +650,7 @@ class GitplorerApp(App):
             for line in out.splitlines():
                 if "\x1f" in line:
                     msg, age = line.split("\x1f", 1)
-                    commits.append((msg[:50], age))
+                    commits.append((escape(msg[:50]), age))
 
         self._expanded_path = path_str
         self._expanded_commits = commits
@@ -587,6 +680,20 @@ class GitplorerApp(App):
         self._remote_url = ""
         if changed:
             self._render_table()
+
+    def action_shrink_panel(self) -> None:
+        self._panel_width = max(20, self._panel_width - 4)
+        panel = self.query_one(RepoPanel)
+        panel.styles.width = self._panel_width
+        panel._width = self._panel_width
+        panel.load_repo(self._selected_repo())
+
+    def action_grow_panel(self) -> None:
+        self._panel_width = min(70, self._panel_width + 4)
+        panel = self.query_one(RepoPanel)
+        panel.styles.width = self._panel_width
+        panel._width = self._panel_width
+        panel.load_repo(self._selected_repo())
 
     def action_git_push(self) -> None:
         repo = self._selected_repo()
