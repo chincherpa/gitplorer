@@ -1,0 +1,94 @@
+<h2>Right Panel — Always On or Togglable?</h2>
+<p class="subtitle">How should the commit panel behave when you navigate the repo list?</p>
+
+<div class="cards">
+  <div class="card" data-choice="always-on" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="font-family:monospace;font-size:11px;background:#1a1a2e;color:#e0e0e0;padding:12px;border-radius:4px;line-height:1.6">
+        <div style="color:#888;margin-bottom:8px">gitplorer ── Git repository dashboard</div>
+        <div style="display:flex;gap:0">
+          <div style="flex:0 0 58%;border-right:1px solid #444;padding-right:8px">
+            <div style="color:#888;font-size:10px;margin-bottom:4px">Repo          Branch   Status   Last Commit</div>
+            <div style="background:#2a2a4a;color:#7dd3fc;padding:2px 4px">▶ gitplorer    main     ✓        feat: add panel</div>
+            <div style="padding:2px 4px">  notes-admin  master   ~2 ?1    fix: typo</div>
+            <div style="padding:2px 4px">  dotfiles     main     ✓        update aliases</div>
+            <div style="padding:2px 4px">  nvim-config  main     +1       add plugin</div>
+            <div style="padding:2px 4px">  scripts      dev      ✓        clean up</div>
+          </div>
+          <div style="flex:0 0 42%;padding-left:8px;color:#aaa">
+            <div style="color:#7dd3fc;margin-bottom:4px">gitplorer</div>
+            <div style="color:#888;font-size:10px">main ↑2</div>
+            <div style="height:1px;background:#333;margin:6px 0"></div>
+            <div style="color:#888;font-size:10px;margin-bottom:4px">COMMITS</div>
+            <div style="font-size:10px"><span style="color:#f59e0b">a1b2c3</span> feat: add panel <span style="color:#555">2h ago</span></div>
+            <div style="font-size:10px"><span style="color:#f59e0b">d4e5f6</span> fix: cursor keys <span style="color:#555">1d ago</span></div>
+            <div style="font-size:10px"><span style="color:#f59e0b">789abc</span> refactor config  <span style="color:#555">3d ago</span></div>
+            <div style="font-size:10px"><span style="color:#f59e0b">def012</span> add sidebar      <span style="color:#555">5d ago</span></div>
+            <div style="font-size:10px"><span style="color:#f59e0b">345678</span> initial commit   <span style="color:#555">1w ago</span></div>
+            <div style="height:1px;background:#333;margin:6px 0"></div>
+            <div style="color:#888;font-size:10px;margin-bottom:4px">CHANGED FILES</div>
+            <div style="font-size:10px;color:#aaa">✓ clean</div>
+          </div>
+        </div>
+        <div style="color:#555;font-size:10px;margin-top:8px">f5=refresh  f=filter  s=sort  d=diff  →=commits  p=push  enter=detail</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Always Visible</h3>
+      <p>Panel always open on the right. Updates instantly as cursor moves. Table narrower permanently.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="togglable" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="font-family:monospace;font-size:11px;background:#1a1a2e;color:#e0e0e0;padding:12px;border-radius:4px;line-height:1.6">
+        <div style="color:#888;margin-bottom:8px">gitplorer ── Git repository dashboard</div>
+        <div style="display:flex;gap:0">
+          <div style="flex:1;padding-right:4px">
+            <div style="color:#888;font-size:10px;margin-bottom:4px">Repo          Branch   Status   Last Commit          Age       ↑↓</div>
+            <div style="background:#2a2a4a;color:#7dd3fc;padding:2px 4px">▶ gitplorer    main     ✓        feat: add panel      2h ago    ↑2</div>
+            <div style="padding:2px 4px">  notes-admin  master   ~2 ?1    fix: typo            1d ago</div>
+            <div style="padding:2px 4px">  dotfiles     main     ✓        update aliases       3d ago</div>
+            <div style="padding:2px 4px">  nvim-config  main     +1       add plugin           5d ago</div>
+            <div style="padding:2px 4px">  scripts      dev      ✓        clean up             1w ago</div>
+          </div>
+        </div>
+        <div style="color:#555;font-size:10px;margin-top:8px">f5=refresh  f=filter  s=sort  <span style="color:#7dd3fc">c=panel</span>  d=diff  →=commits  p=push  q=quit</div>
+        <div style="margin-top:6px;color:#888;font-size:10px;font-style:italic">Press <span style="color:#7dd3fc;font-style:normal">c</span> to open commit panel →</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Togglable (key press)</h3>
+      <p>Full-width table by default. Press a key (e.g. <code>c</code>) to slide in the panel. Table colums stay wide.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="auto-preview" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="font-family:monospace;font-size:11px;background:#1a1a2e;color:#e0e0e0;padding:12px;border-radius:4px;line-height:1.6">
+        <div style="color:#888;margin-bottom:8px">gitplorer ── Git repository dashboard</div>
+        <div style="display:flex;gap:0">
+          <div style="flex:0 0 58%;border-right:1px solid #444;padding-right:8px">
+            <div style="color:#888;font-size:10px;margin-bottom:4px">Repo          Branch   Status   Last Commit</div>
+            <div style="background:#2a2a4a;color:#7dd3fc;padding:2px 4px">▶ gitplorer    main     ✓        feat: add panel</div>
+            <div style="padding:2px 4px;color:#555">  notes-admin  ...</div>
+            <div style="padding:2px 4px;color:#555">  dotfiles     ...</div>
+          </div>
+          <div style="flex:0 0 42%;padding-left:8px;color:#aaa">
+            <div style="color:#7dd3fc;margin-bottom:2px">gitplorer</div>
+            <div style="color:#888;font-size:10px;margin-bottom:6px">main · 2h ago · chincherpa</div>
+            <div style="font-size:10px"><span style="color:#f59e0b">a1b2c3</span> feat: add panel</div>
+            <div style="font-size:10px"><span style="color:#f59e0b">d4e5f6</span> fix: cursor keys</div>
+            <div style="font-size:10px"><span style="color:#f59e0b">789abc</span> refactor config</div>
+            <div style="font-size:10px;color:#555">↑ updates as you move ↑</div>
+          </div>
+        </div>
+        <div style="color:#555;font-size:10px;margin-top:8px">panel auto-shows on selection ─ no key needed</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Auto-Preview</h3>
+      <p>Panel always visible but loads content lazily as cursor lands on each repo. No toggle needed — it's always there, always current.</p>
+    </div>
+  </div>
+</div>
